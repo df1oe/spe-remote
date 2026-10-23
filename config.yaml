@@ -1,14 +1,15 @@
 serial:
-  port: /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AI040V80-if00-port0
-  baudrate: 115200
+  port: /dev/serial/by-id/usb-FTDI_FT4232H_Device_FTUOSHOI-if03-port0
+  baudrate: 9600
   timeout: 1.0
-
+# port: /dev/serial/by-id/usb-FTDI_FT4232H_Device_FTUOSHOI-if03-port0
+ 
 server:
   port: 8888
   host: "0.0.0.0"
 
 polling:
-  tx_interval: 0.2           # seconds between polls during TX/Operate
+  tx_interval: 0.4           # seconds between polls during TX/Operate
   idle_interval: 1.0         # seconds between polls when idle (RX + Standby)
   heartbeat: 15              # seconds before forcing a state push even if unchanged
   presence_heartbeat: 5      # seconds between presence heartbeat msgs
@@ -39,13 +40,13 @@ amp:
 # A client (MacExpert / web dashboard) can change this and the per-radio
 # settings live over the WebSocket — see README "Client-driven radio config".
 radio:
-  kind: flex              # flex | tci | none
+  kind: tci              # flex | tci | none
 
 # FlexRadio 6000-series control over the SmartSDR TCP API. Used when
 # radio.kind is flex. (enabled is kept in sync with radio.kind for
 # back-compat with configs written before the selector existed.)
 flex:
-  enabled: true
+  enabled: false
   host: "192.168.1.148"   # Static LAN IP of the Flex; leave empty ("") to auto-discover via SmartSDR UDP broadcast on port 4992
   port: 4992              # SmartSDR TCP control port
   slice_rx: 0             # Which slice to drive during tune cycles
@@ -54,11 +55,11 @@ flex:
 # Expert Electronics SunSDR / ExpertSDR3 control over TCI. Used when
 # radio.kind is tci. TCI is a WebSocket text protocol (default port 50001).
 tci:
-  host: "127.0.0.1"       # ExpertSDR3 / SunSDR TCI host
+  host: "192.168.57.60"       # ExpertSDR3 / SunSDR TCI host
   port: 50001             # TCI WebSocket port
   trx: 0                  # which TRX/receiver to key (0 or 1)
   mode: CW                # mode set on the tuned TRX
   tune_drive: 0           # tune-power percent; 0 = leave to ExpertSDR
 
 logging:
-  level: INFO            # DEBUG, INFO, WARNING, ERROR
+  level: DEBUG            # DEBUG, INFO, WARNING, ERROR

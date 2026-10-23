@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SerialConfig:
-    port: str = "/dev/ttyUSB0"
-    baudrate: int = 115200
+    port: str = "/dev/ttyUSB5"
+    baudrate: int = 9600
     timeout: float = 1.0
     # Optional path to a debug raw-byte log. When set, every chunk of
     # bytes the amp sends gets appended verbatim with a monotonic
@@ -18,7 +18,7 @@ class SerialConfig:
     # that's not CSV CNT=0x43 or RCU type=0x6A). Off by default —
     # production should not run with this on; it grows unbounded.
     # Investigation-only.
-    debug_raw_log: str = ""
+    # debug_raw_log: str = "/home/roland/development/spe-expert/serial.log"
 
 
 @dataclass
@@ -102,7 +102,7 @@ class UpdatesConfig:
     and the dashboard shows a banner when a newer one is out. It never
     updates anything by itself.
     """
-    check: bool = True
+    check: bool = False
 
 
 @dataclass

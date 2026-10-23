@@ -17,7 +17,7 @@
       // Pull the current radio config so the settings panel reflects it.
       ws.send("get_config");
       // (Re)connected — possibly to a freshly updated server.
-      checkUpdateStatus();
+      /// checkUpdateStatus();
     };
 
     ws.onclose = () => {
@@ -117,6 +117,7 @@
   // power level: display name and whether to surface the 2K-FA extra
   // temp readings (lower heatsink + combiner).
   const MODELS = {
+    "10K": { name: "SPE 1.0K-FA", extraTemps: false },
     "13K": { name: "SPE 1.3K-FA", extraTemps: false },
     "15K": { name: "SPE 1.5K-FA", extraTemps: false },
     "20K": { name: "SPE 2K-FA",   extraTemps: true  },
@@ -126,6 +127,11 @@
   // Power-bar full-scale + tick labels per (model, p_level). p_level is
   // L/M/H from the amp; values come from the SPE manuals for each model.
   const LEVELS = {
+    "10K": {
+      L: { maxW: 200,  ticks:  ["0","50","100","150","200"] },
+      M: { maxW: 600,  ticks: ["0","150","300","450","600"] },
+      H: { maxW: 1200, ticks: ["0","300","600","900","1.2k"] },
+    },
     "13K": {
       L: { maxW: 500,  ticks: ["0","100","200","300","400","450","500"] },
       M: { maxW: 800,  ticks: ["0","200","400","500","600","700","800"] },
@@ -143,7 +149,9 @@
     },
   };
   // Fallback scale when neither model nor level has been heard from yet.
-  const SCALE_DEFAULT = { maxW: 1500, ticks: ["0","250","500","750","1.0k","1.3k","1.5k"] };
+  //  const SCALE_DEFAULT = { maxW: 1500, ticks: ["0","250","500","750","1.0k","1.3k","1.5k"] };
+
+  const SCALE_DEFAULT = { maxW: 1100, ticks: ["0","200","400","500","600","800", "1.1k"] };
 
   let currentModelKey = "";
   let currentLevelKey = "";
@@ -625,7 +633,7 @@
 
   // The first server-side check lands ~60 s after the server starts, so
   // re-read the cache now and then rather than only at page load.
-  setInterval(checkUpdateStatus, 10 * 60 * 1000);
+  // setInterval(checkUpdateStatus, 10 * 60 * 1000);
 
   // --- Init ---
   connect();

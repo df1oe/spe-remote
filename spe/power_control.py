@@ -48,6 +48,7 @@ class PowerController:
           DTR=1 -> DTR=0 -> RTS=1 -> wait 1s -> DTR=1 -> RTS=0
         Startup takes 3-4.5 seconds after this sequence.
         """
+        
         async with self._lock:
             return await asyncio.get_event_loop().run_in_executor(
                 None, self._power_on_sync
@@ -92,9 +93,20 @@ class PowerController:
         # it goes out on the same port everything else uses. No second
         # serial.Serial() open — that's what was wedging the FTDI on
         # the second power-off in a session.
+        port = self.serial_handler._port  # type: ignore[attr-defined]
+        if port is None or not port.is_open:
+            logger.error("Power ON failed: serial port not open")
+            return False
         try:
-            logger.info(f"Power OFF: queueing SWITCH OFF (0x0A) via serial_handler")
-            self.serial_handler.send_command("power_off")
+            #logger.info(f"Power OFF: queueing SWITCH OFF (0x0A) via serial_handler")
+            # self.serial_handler.send_command("power_off")
+            logger.info(f"Power OFF: DTR/RTS sequence on {self.serial_config.port}")
+            port.dtr = False
+            port.rts = False
+            time.sleep(1)
+            port.dtr = False
+            port.rts = False
+            logger.info("Power OFF: DTR sequence complete (amp stopping in 3-4s)")
             return True
         except Exception as e:
             logger.error(f"Power OFF failed: {e}")

@@ -35,8 +35,8 @@ import serial.tools.list_ports
 from spe.config import SerialConfig, PollingConfig
 from spe.protocol import (
     CMD_REQUEST, CMD_RCU_ON, CMD_RCU_OFF, COMMANDS,
-    RESP_STATUS_CNT, RESP_RCU_TYPE,
-    AmplifierState, parse_status,
+    RESP_STATUS_CNT_SPE13, RESP_STATUS_CNT_SPE10,  RESP_RCU_TYPE,
+    AmplifierState, parse_status, get_status_spe10
 )
 
 logger = logging.getLogger(__name__)
@@ -393,7 +393,7 @@ class SerialHandler:
             return
         with self._write_lock:
             try:
-                logger.debug(f"Serial write: {payload.hex()}")
+                # logger.debug(f"Serial write: {payload.hex()}")
                 port.write(payload)
                 # flush() forces the kernel write buffer to drain. Without
                 # it, FTDI writes accumulate in the kernel queue and the
@@ -579,7 +579,11 @@ class SerialHandler:
                 return
 
             marker = self._buffer[3]
-            if marker == RESP_STATUS_CNT:
+#            logger.debug(f"Found sync at 0, marker={marker:#04x}, buffer={self._buffer.hex()}")
+            if marker == RESP_STATUS_CNT_SPE10:
+                if not self._consume_spe10_frame():
+                    return
+            if marker == RESP_STATUS_CNT_SPE13:
                 if not self._consume_csv_frame():
                     return
             elif marker == RESP_RCU_TYPE:
@@ -598,6 +602,30 @@ class SerialHandler:
             i += 1
         return None
 
+    def _consume_spe10_frame(self) -> bool:
+        """SPE 1.0 K: 3 sync + 1 CNT + 30 data + 2 checksum  = 36 bytes."""
+        length = self._buffer[3]
+        total = 3 + 1 + length + 2 + 2
+        
+        if len(self._buffer) < total:
+            return False
+        payload = bytes(self._buffer[4:4 + length])
+        del self._buffer[:total]
+        logger.debug("                          00,01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30")
+        logger.debug(f"Consumed SPE 1.0 K frame: {payload.hex(",")}")
+        
+        try:
+            # line = payload.decode("ascii", errors="replace")
+            state = get_status_spe10(payload) 
+            if state:
+                self.set_state(state)
+        except Exception as e:
+            logger.warning(f"SPE 1.0 K frame parse failed: {e}")
+        
+        
+        return True  # TODO: implement SPE 1.0 K frame parsing if needed
+    
+
     def _consume_csv_frame(self) -> bool:
         """CSV: 3 sync + 1 CNT + 67 data + 2 checksum + 2 CRLF = 75 bytes."""
         length = self._buffer[3]
@@ -610,11 +638,17 @@ class SerialHandler:
             line = payload.decode("ascii", errors="replace")
             state = parse_status(line)
             if state:
-                # Stamp the configured temperature unit onto every state.
+                self.set_state(state)
+        except Exception as e:
+            logger.warning(f"CSV parse failed: {e}")
+        return True
+
+    def set_state(self, state):
+        # Stamp the configured temperature unit onto every state.
                 # The protocol doesn't tell us C vs F, so without this the
                 # web client would have to assume one.
-                state.temperature_unit = self.temperature_unit
-                state.tune_active = self._last_tune_active
+        state.temperature_unit = self.temperature_unit
+        state.tune_active = self._last_tune_active
                 # Diagnostic: log every op_status transition with the raw
                 # decoded line + parsed (op,tx). Helps tell apart:
                 #   - amp legitimately blipping to Stby (firmware quirk
@@ -624,65 +658,63 @@ class SerialHandler:
                 #     STANDBY flash during TX");
                 #   - Node-RED or another WS client toggling oper/stby.
                 # WARNING level so it surfaces in journald without DEBUG.
-                if state.op_status != self._prev_op_status:
-                    logger.warning(
+        if state.op_status != self._prev_op_status:
+            logger.warning(
                         f"op_status transition: "
                         f"{self._prev_op_status or '(init)'} -> {state.op_status} "
-                        f"(tx={state.tx_status}) raw={line!r}"
+                    #    f"(tx={state.tx_status}) raw={line!r}"
                     )
-                    self._prev_op_status = state.op_status
+            self._prev_op_status = state.op_status
 
                 # p_out averaging. Reset (don't smooth) across an op/tx
                 # transition — e.g. RX -> TX at the start of a transmission
                 # — so the average doesn't start a new TX dragged down by
                 # whatever was reading during idle/standby.
-                pout_key = (state.op_status, state.tx_status)
-                try:
-                    pout_raw = float(state.p_out)
-                except (TypeError, ValueError):
-                    pout_raw = 0.0
-                if self._pout_avg is None or pout_key != self._pout_avg_key:
-                    self._pout_avg = pout_raw
-                else:
-                    a = self._pout_avg_alpha
-                    self._pout_avg = a * pout_raw + (1 - a) * self._pout_avg
-                self._pout_avg_key = pout_key
-                state.p_out_avg = round(self._pout_avg, 1)
+        pout_key = (state.op_status, state.tx_status)
+        try:
+            pout_raw = float(state.p_out)
+        except (TypeError, ValueError):
+            pout_raw = 0.0
+        if self._pout_avg is None or pout_key != self._pout_avg_key:
+            self._pout_avg = pout_raw
+        else:
+            a = self._pout_avg_alpha
+            self._pout_avg = a * pout_raw + (1 - a) * self._pout_avg
+        self._pout_avg_key = pout_key
+        state.p_out_avg = round(self._pout_avg, 1)
 
                 # p_out peak-hold. Reset on the same op/tx transitions as
                 # the average, for the same reason — a fresh TX shouldn't
                 # start by holding whatever the amp last read during idle.
-                now = time.monotonic()
-                if pout_key != self._pout_peak_key:
+        now = time.monotonic()
+        if pout_key != self._pout_peak_key:
                     # New TX/RX context — start the hold fresh at the live
                     # reading.
-                    self._pout_peak = pout_raw
-                    self._pout_peak_at = now
-                elif pout_raw >= self._pout_peak:
+            self._pout_peak = pout_raw
+            self._pout_peak_at = now
+        elif pout_raw >= self._pout_peak:
                     # New high sample — pin it and restart the hold timer.
-                    self._pout_peak = pout_raw
-                    self._pout_peak_at = now
-                elif (now - self._pout_peak_at) > self._pout_peak_hold_s:
+            self._pout_peak = pout_raw
+            self._pout_peak_at = now
+        elif (now - self._pout_peak_at) > self._pout_peak_hold_s:
                     # Hold window elapsed — decay toward the live reading at
                     # a constant W/s, scaled by real elapsed time since the
                     # previous frame so the rate is independent of the
                     # sample rate. The max() floor stops it dropping below
                     # the live reading.
-                    dt = now - self._pout_peak_prev_tick
-                    self._pout_peak = max(
+            dt = now - self._pout_peak_prev_tick
+            self._pout_peak = max(
                         pout_raw,
                         self._pout_peak - self._pout_peak_decay_w_per_s * dt,
                     )
-                self._pout_peak_prev_tick = now
-                self._pout_peak_key = pout_key
-                state.p_out_peak = round(self._pout_peak, 1)
+        self._pout_peak_prev_tick = now
+        self._pout_peak_key = pout_key
+        state.p_out_peak = round(self._pout_peak, 1)
 
-                self._state = state
-                self._last_state_at = time.monotonic()
-                self.on_state_update(state)
-        except Exception as e:
-            logger.warning(f"CSV parse failed: {e}")
-        return True
+        self._state = state
+        self._last_state_at = time.monotonic()
+        self.on_state_update(state)
+        return
 
     def _consume_rcu_frame(self) -> bool:
         """RCU: sync + 0x6A + payload; payload ends at next sync."""
